@@ -54,8 +54,11 @@ x = torch.rand(1, TILE, TILE, 3)
 with torch.no_grad():
     ref = model(x).numpy()
 
-import ai_edge_torch
-edge = ai_edge_torch.convert(model, (x,))
+try:
+    import litert_torch as conv_lib
+except ImportError:
+    import ai_edge_torch as conv_lib
+edge = conv_lib.convert(model, (x,))
 edge.export(OUT)
 
 from ai_edge_litert.interpreter import Interpreter
