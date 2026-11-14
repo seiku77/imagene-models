@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        model: ${{ fromJSON(github.event.inputs.models || '["sd15","dreamshaper8","realistic-vision-51","anything-v5"]') }}
+        model: ${{ fromJSON(github.event.inputs.models || '["sd15"]') }}
     env:
       ID: ${{ matrix.model }}
       TAG: ${{ matrix.model }}-v1
@@ -44,26 +44,29 @@ jobs:
 
       - name: Get MediaPipe converter
         run: |
-          find_conv() {
-            find "$1" -name convert.py | grep -i -E 'image_?gen|diffus' | head -1
+          # 変換スクリプトは現在のリポジトリから削除されているため、過去のコミットから取り出す
+          find_hist() {
+            git -C "$1" log --all --diff-filter=AM --format='C %H' --name-only -- '*convert.py' \
+              | awk '/^C /{c=$2; next} NF && tolower($0) ~ /image_?gen/ {print c, $0; exit}'
           }
-          git clone -q --depth 1 --filter=blob:none https://github.com/google-ai-edge/mediapipe-samples mps
-          CONVERTER=$(find_conv mps)
-          if [ -z "$CONVERTER" ]; then
-            git clone -q --depth 1 --filter=blob:none https://github.com/google-ai-edge/mediapipe mp
-            CONVERTER=$(find_conv mp)
-          fi
-          if [ -z "$CONVERTER" ]; then
-            echo "convert.py not found. candidates:"
-            find mps mp -name '*.py' 2>/dev/null | grep -i -E 'image|diffus|convert' | head -50
-            exit 1
-          fi
-          CONVERTER=$(realpath "$CONVERTER")
+          FOUND=""
+          for REPO in mediapipe-samples mediapipe; do
+            git clone -q --filter=blob:none --no-checkout "https://github.com/google-ai-edge/$REPO" "src-$REPO"
+            FOUND=$(find_hist "src-$REPO")
+            if [ -n "$FOUND" ]; then DIR="src-$REPO"; break; fi
+          done
+          if [ -z "$FOUND" ]; then echo "converter not found in history"; exit 1; fi
+          COMMIT=${FOUND%% *}
+          FILE=${FOUND#* }
+          git -C "$DIR" checkout "$COMMIT" -- "$(dirname "$FILE")"
+          CONVERTER=$(realpath "$DIR/$FILE")
           echo "CONVERTER=$CONVERTER" >> "$GITHUB_ENV"
-          echo "converter: $CONVERTER"
+          echo "CONVERTER_REF=google-ai-edge/${DIR#src-}@$COMMIT:$FILE" >> "$GITHUB_ENV"
+          echo "converter: $CONVERTER ($COMMIT)"
           ls "$(dirname "$CONVERTER")"
           if [ -f "$(dirname "$CONVERTER")/requirements.txt" ]; then
-            grep -v -i '^torch' "$(dirname "$CONVERTER")/requirements.txt" > /tmp/req.txt || true
+            cat "$(dirname "$CONVERTER")/requirements.txt"
+            grep -v -i -E '^torch([=<> ]|$)' "$(dirname "$CONVERTER")/requirements.txt" > /tmp/req.txt || true
             pip install -r /tmp/req.txt || true
           fi
 
@@ -111,4 +114,4 @@ jobs:
         run: |
           gh release delete "$TAG" --cleanup-tag -y || true
           gh release create "$TAG" dist/* --title "$TAG" \
-            --notes "MediaPipe Image Generator用に変換したモデル。ライセンス: CreativeML OpenRAIL-M(同梱のLICENSEを参照)。元モデル: $(cat $RUNNER_TEMP/model.ckpt.source.json)"
+            --notes "MediaPipe Image Generator用に変換したモデル。ライセンス: CreativeML OpenRAIL-M(同梱のLICENSEを参照)。元モデル: $(cat $RUNNER_TEMP/model.ckpt.source.json) / 変換スクリプト: $CONVERTER_REF"
