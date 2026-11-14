@@ -63,6 +63,10 @@ jobs:
           ./sd-cli -M convert -m "$SRC" -o "dist/$ID.$QTYPE.gguf" --type "$QTYPE"
           ls -la dist
           (cd dist && sha256sum "$ID.$QTYPE.gguf" | tee "$ID.$QTYPE.gguf.sha256" && stat -c %s "$ID.$QTYPE.gguf" > "$ID.$QTYPE.gguf.size")
+          # GitHub Releases は1ファイル2GiB未満。超えたら分割する(順に連結すると元のファイル)
+          if [ "$(cat dist/$ID.$QTYPE.gguf.size)" -gt 2000000000 ]; then
+            (cd dist && split -b 1900M -d -a 2 "$ID.$QTYPE.gguf" "$ID.$QTYPE.gguf.part" && rm "$ID.$QTYPE.gguf" && ls *.part* > "$ID.$QTYPE.gguf.parts")
+          fi
           curl -fsSL https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE -o dist/LICENSE-CreativeML-OpenRAIL-M.txt
       - name: Release
         run: |
