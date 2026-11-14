@@ -44,12 +44,28 @@ jobs:
 
       - name: Get MediaPipe converter
         run: |
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/google-ai-edge/mediapipe-samples mps
-          cd mps && git sparse-checkout set examples/image_generation
-          CONVERTER=$(find "$PWD" -name convert.py -path '*image_gen*' | head -1)
-          test -n "$CONVERTER"
+          find_conv() {
+            find "$1" -name convert.py | grep -i -E 'image_?gen|diffus' | head -1
+          }
+          git clone -q --depth 1 --filter=blob:none https://github.com/google-ai-edge/mediapipe-samples mps
+          CONVERTER=$(find_conv mps)
+          if [ -z "$CONVERTER" ]; then
+            git clone -q --depth 1 --filter=blob:none https://github.com/google-ai-edge/mediapipe mp
+            CONVERTER=$(find_conv mp)
+          fi
+          if [ -z "$CONVERTER" ]; then
+            echo "convert.py not found. candidates:"
+            find mps mp -name '*.py' 2>/dev/null | grep -i -E 'image|diffus|convert' | head -50
+            exit 1
+          fi
+          CONVERTER=$(realpath "$CONVERTER")
           echo "CONVERTER=$CONVERTER" >> "$GITHUB_ENV"
           echo "converter: $CONVERTER"
+          ls "$(dirname "$CONVERTER")"
+          if [ -f "$(dirname "$CONVERTER")/requirements.txt" ]; then
+            grep -v -i '^torch' "$(dirname "$CONVERTER")/requirements.txt" > /tmp/req.txt || true
+            pip install -r /tmp/req.txt || true
+          fi
 
       - name: Fetch checkpoint
         run: |
