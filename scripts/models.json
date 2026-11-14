@@ -1,0 +1,22 @@
+{
+  "sd15": {
+    "name": "Stable Diffusion v1.5",
+    "repos": ["stable-diffusion-v1-5/stable-diffusion-v1-5"],
+    "prefer": ["v1-5-pruned-emaonly.safetensors", "v1-5-pruned-emaonly.ckpt"]
+  },
+  "dreamshaper8": {
+    "name": "DreamShaper 8",
+    "repos": ["Lykon/DreamShaper", "Lykon/dreamshaper-8"],
+    "prefer": ["DreamShaper_8_pruned.safetensors"]
+  },
+  "realistic-vision-51": {
+    "name": "Realistic Vision 5.1",
+    "repos": ["SG161222/Realistic_Vision_V5.1_noVAE"],
+    "prefer": ["Realistic_Vision_V5.1_fp16-no-ema.safetensors", "Realistic_Vision_V5.1.safetensors"]
+  },
+  "anything-v5": {
+    "name": "Anything V5",
+    "repos": ["stablediffusionapi/anything-v5", "Yntec/AnythingV5", "genai-archive/anything-v5"],
+    "prefer": ["AnythingV5_v5PrtRE.safetensors", "AnythingV5Ink_ink.safetensors"]
+  }
+}

@@ -1,0 +1,98 @@
+name: Convert models
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: 'モデルID(JSON配列)'
+        default: '["sd15","dreamshaper8","realistic-vision-51","anything-v5"]'
+  push:
+    branches: ['ccr-*']
+    paths: ['.github/workflows/convert.yml', 'scripts/**']
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        model: ${{ fromJSON(github.event.inputs.models || '["sd15","dreamshaper8","realistic-vision-51","anything-v5"]') }}
+    env:
+      ID: ${{ matrix.model }}
+      TAG: ${{ matrix.model }}-v1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install huggingface_hub safetensors typing_extensions numpy Pillow requests pytorch_lightning absl-py
+
+      - name: Get MediaPipe converter
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/google-ai-edge/mediapipe-samples mps
+          cd mps && git sparse-checkout set examples/image_generation
+          CONVERTER=$(find "$PWD" -name convert.py -path '*image_gen*' | head -1)
+          test -n "$CONVERTER"
+          echo "CONVERTER=$CONVERTER" >> "$GITHUB_ENV"
+          echo "converter: $CONVERTER"
+
+      - name: Fetch checkpoint
+        run: |
+          python scripts/fetch_ckpt.py "$ID" "$RUNNER_TEMP/model.ckpt"
+          rm -rf ~/.cache/huggingface
+          df -h /
+
+      - name: Convert
+        run: |
+          cd "$(dirname "$CONVERTER")"
+          python "$CONVERTER" --ckpt_path "$RUNNER_TEMP/model.ckpt" --output_path "$RUNNER_TEMP/out/$ID"
+          rm -f "$RUNNER_TEMP/model.ckpt"
+          ls "$RUNNER_TEMP/out/$ID" | wc -l
+          du -sh "$RUNNER_TEMP/out/$ID"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          curl -fsSL https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE -o "$RUNNER_TEMP/out/$ID/LICENSE-CreativeML-OpenRAIL-M.txt"
+          cp "$RUNNER_TEMP/out/$ID/LICENSE-CreativeML-OpenRAIL-M.txt" dist/
+          (cd "$RUNNER_TEMP/out" && zip -q -1 -r "$GITHUB_WORKSPACE/dist/$ID.zip" "$ID")
+          rm -rf "$RUNNER_TEMP/out"
+          cd dist
+          SIZE=$(stat -c %s "$ID.zip")
+          SHA=$(sha256sum "$ID.zip" | cut -d' ' -f1)
+          if [ "$SIZE" -gt 2000000000 ]; then
+            split -b 1900M -d -a 2 "$ID.zip" "$ID.zip.part"
+            rm "$ID.zip"
+          fi
+          python - "$ID" "$SIZE" "$SHA" "$TAG" "${{ github.repository }}" "$RUNNER_TEMP/model.ckpt.source.json" <<'PY'
+          import json, os, sys
+          mid, size, sha, tag, repo, src = sys.argv[1:]
+          files = sorted(f for f in os.listdir(".") if f.startswith(mid + ".zip"))
+          base = f"https://github.com/{repo}/releases/download/{tag}/"
+          json.dump({"id": mid, "sizeBytes": int(size), "sha256": sha,
+                     "urls": [base + f for f in files], "source": json.load(open(src))},
+                    open(f"{mid}.manifest.json", "w"), indent=2)
+          print(open(f"{mid}.manifest.json").read())
+          PY
+          ls -la
+
+      - name: Release
+        run: |
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" dist/* --title "$TAG" \
+            --notes "MediaPipe Image Generator用に変換したモデル。ライセンス: CreativeML OpenRAIL-M(同梱のLICENSEを参照)。元モデル: $(cat $RUNNER_TEMP/model.ckpt.source.json)"
