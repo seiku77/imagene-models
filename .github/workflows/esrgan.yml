@@ -1,0 +1,38 @@
+name: Export Real-ESRGAN
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-*']
+    paths: ['.github/workflows/esrgan.yml', 'scripts/export_esrgan.py']
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: realesrgan-x4v3-v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install ai-edge-torch ai-edge-litert numpy
+      - name: Export
+        run: |
+          mkdir -p dist
+          python scripts/export_esrgan.py 128 dist/realesrgan_x4v3_t128.tflite
+          ls -la dist
+          curl -fsSL https://raw.githubusercontent.com/xinntao/Real-ESRGAN/master/LICENSE -o dist/LICENSE-Real-ESRGAN.txt
+          (cd dist && sha256sum realesrgan_x4v3_t128.tflite | tee realesrgan_x4v3_t128.tflite.sha256)
+      - name: Release
+        run: |
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" dist/* --title "$TAG" \
+            --notes "Real-ESRGAN realesr-general-x4v3 (BSD-3-Clause, xinntao/Real-ESRGAN) をTFLiteに変換。入力 [1,128,128,3] float32 0..1 / 出力 [1,512,512,3]"

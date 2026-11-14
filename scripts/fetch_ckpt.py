@@ -44,6 +44,36 @@ if fname.endswith(".safetensors"):
 else:
     sd = torch.load(path, map_location="cpu", weights_only=False)
     sd = sd.get("state_dict", sd)
+if cfg.get("lcm_lora"):
+    # LCM-LoRA を UNet に合成し、LDM形式のキーに戻す(少ないステップで生成できるようにする)
+    import importlib.util, urllib.request
+    from diffusers import StableDiffusionPipeline
+    print("fusing", cfg["lcm_lora"])
+    pipe = StableDiffusionPipeline.from_single_file(path, torch_dtype=torch.float32)
+    pipe.load_lora_weights(cfg["lcm_lora"])
+    pipe.fuse_lora(lora_scale=1.0)
+    pipe.unload_lora_weights()
+    script = "conv_diffusers_to_ldm.py"
+    urllib.request.urlretrieve("https://raw.githubusercontent.com/huggingface/diffusers/main/scripts/convert_diffusers_to_original_stable_diffusion.py", script)
+    spec = importlib.util.spec_from_file_location("conv", script)
+    conv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(conv)
+    unet = conv.convert_unet_state_dict(pipe.unet.state_dict())
+    old_keys = {k for k in sd if k.startswith("model.diffusion_model.")}
+    new_keys = {"model.diffusion_model." + k for k in unet}
+    print("unet keys old/new/common:", len(old_keys), len(new_keys), len(old_keys & new_keys))
+    assert old_keys == new_keys, sorted(old_keys ^ new_keys)[:20]
+    changed = 0
+    for k, v in unet.items():
+        key = "model.diffusion_model." + k
+        v = v.reshape(sd[key].shape).to(sd[key].dtype)
+        if not torch.equal(v, sd[key]):
+            changed += 1
+        sd[key] = v
+    print("changed tensors:", changed)
+    assert changed > 50
+    del pipe
+
 # diffusers由来の単一ファイルには、LDMのスケジューラ用バッファ(alphas_cumprod など)が無いことがある。
 # MediaPipe は alphas_cumprod.bin を各ステップで読むため、無いとクラッシュする。SD1.5 の標準スケジュールで補う。
 if "alphas_cumprod" not in sd:

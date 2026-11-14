@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        model: ${{ fromJSON(github.event.inputs.models || '["dreamshaper8","realistic-vision-51","anything-v5"]') }}
+        model: ${{ fromJSON(github.event.inputs.models || '["dreamshaper8-lcm"]') }}
     env:
       ID: ${{ matrix.model }}
       TAG: ${{ matrix.model }}-v1
@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --index-url https://download.pytorch.org/whl/cpu torch
-          pip install huggingface_hub safetensors typing_extensions numpy Pillow requests pytorch_lightning absl-py
+          pip install diffusers transformers peft accelerate huggingface_hub safetensors typing_extensions numpy Pillow requests pytorch_lightning absl-py
 
       - name: Get MediaPipe converter
         run: |
