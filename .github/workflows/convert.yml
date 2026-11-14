@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        model: ${{ fromJSON(github.event.inputs.models || '["sd15"]') }}
+        model: ${{ fromJSON(github.event.inputs.models || '["dreamshaper8","realistic-vision-51","anything-v5"]') }}
     env:
       ID: ${{ matrix.model }}
       TAG: ${{ matrix.model }}-v1
