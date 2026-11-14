@@ -82,6 +82,9 @@ jobs:
           python "$CONVERTER" --ckpt_path "$RUNNER_TEMP/model.ckpt" --output_path "$RUNNER_TEMP/out/$ID"
           rm -f "$RUNNER_TEMP/model.ckpt"
           ls "$RUNNER_TEMP/out/$ID" | wc -l
+          for f in alphas_cumprod.bin bpe_simple_vocab_16e6.txt; do
+            test -f "$RUNNER_TEMP/out/$ID/$f" || { echo "missing $f"; exit 1; }
+          done
           du -sh "$RUNNER_TEMP/out/$ID"
 
       - name: Package
