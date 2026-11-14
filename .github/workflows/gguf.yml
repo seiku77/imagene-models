@@ -1,0 +1,92 @@
+name: CPU models (GGUF)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-*']
+    paths: ['.github/workflows/gguf.yml', 'scripts/fetch_source.py']
+
+permissions:
+  contents: write
+
+env:
+  SDCPP_COMMIT: e239e4b
+  QTYPE: q8_0
+
+jobs:
+  build-sd:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build sd-cli
+        run: |
+          git clone https://github.com/leejet/stable-diffusion.cpp sdcpp
+          cd sdcpp && git checkout "$SDCPP_COMMIT" && git submodule update --init --recursive --depth 1
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSD_WEBP=OFF -DSD_WEBM=OFF
+          cmake --build build --target sd-cli -j "$(nproc)"
+          ls -la build/bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sd-cli
+          path: sdcpp/build/bin/sd-cli
+
+  convert:
+    needs: build-sd
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        model: [sd15, dreamshaper8, realistic-vision-51, anything-v5]
+    env:
+      ID: ${{ matrix.model }}
+      TAG: ${{ matrix.model }}-cpu-v1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: sd-cli
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install huggingface_hub
+      - name: Convert
+        run: |
+          chmod +x sd-cli
+          SRC=$(python scripts/fetch_source.py "$ID")
+          echo "source: $SRC"
+          mkdir -p dist
+          ./sd-cli -M convert -m "$SRC" -o "dist/$ID.$QTYPE.gguf" --type "$QTYPE"
+          ls -la dist
+          (cd dist && sha256sum "$ID.$QTYPE.gguf" | tee "$ID.$QTYPE.gguf.sha256" && stat -c %s "$ID.$QTYPE.gguf" > "$ID.$QTYPE.gguf.size")
+          curl -fsSL https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE -o dist/LICENSE-CreativeML-OpenRAIL-M.txt
+      - name: Release
+        run: |
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" dist/* --title "$TAG" --notes "stable-diffusion.cpp(CPU)用に $QTYPE で量子化したGGUF。sd.cpp $SDCPP_COMMIT で変換。ライセンス: CreativeML OpenRAIL-M"
+
+  extras:
+    runs-on: ubuntu-latest
+    env:
+      TAG: cpu-extras-v1
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install huggingface_hub
+      - name: Fetch TAESD and LCM-LoRA
+        run: |
+          mkdir -p dist
+          python - <<'PY'
+          import shutil
+          from huggingface_hub import hf_hub_download
+          shutil.copy(hf_hub_download("madebyollin/taesd", "diffusion_pytorch_model.safetensors"), "dist/taesd.safetensors")
+          shutil.copy(hf_hub_download("latent-consistency/lcm-lora-sdv1-5", "pytorch_lora_weights.safetensors"), "dist/lcm-lora-sdv1-5.safetensors")
+          PY
+          curl -fsSL https://raw.githubusercontent.com/madebyollin/taesd/main/LICENSE -o dist/LICENSE-taesd.txt || true
+          (cd dist && for f in *.safetensors; do sha256sum "$f" > "$f.sha256"; stat -c %s "$f" > "$f.size"; done; ls -la; cat *.sha256)
+      - name: Release
+        run: |
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" dist/* --title "$TAG" --notes "CPUエンジン用の追加ファイル: TAESD(高速な画像デコーダ, MIT, madebyollin/taesd)と LCM-LoRA(latent-consistency/lcm-lora-sdv1-5)"
