@@ -2,6 +2,10 @@ name: CPU models (GGUF)
 
 on:
   workflow_dispatch:
+    inputs:
+      models:
+        description: 'モデルID(JSON配列)'
+        default: '["sd15","dreamshaper8","realistic-vision-51","anything-v5"]'
   push:
     branches: ['ccr-*']
     paths: ['.github/workflows/gguf.yml', 'scripts/fetch_source.py']
@@ -21,7 +25,7 @@ jobs:
         run: |
           git clone https://github.com/leejet/stable-diffusion.cpp sdcpp
           cd sdcpp && git checkout "$SDCPP_COMMIT" && git submodule update --init --recursive --depth 1
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSD_WEBP=OFF -DSD_WEBM=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DSD_WEBP=OFF -DSD_WEBM=OFF -DGGML_NATIVE=OFF
           cmake --build build --target sd-cli -j "$(nproc)"
           ls -la build/bin
       - uses: actions/upload-artifact@v4
@@ -36,7 +40,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        model: [sd15, dreamshaper8, realistic-vision-51, anything-v5]
+        model: ${{ fromJSON(github.event.inputs.models || '["sd15"]') }}
     env:
       ID: ${{ matrix.model }}
       TAG: ${{ matrix.model }}-cpu-v1
@@ -88,5 +92,5 @@ jobs:
           (cd dist && for f in *.safetensors; do sha256sum "$f" > "$f.sha256"; stat -c %s "$f" > "$f.size"; done; ls -la; cat *.sha256)
       - name: Release
         run: |
-          gh release delete "$TAG" --cleanup-tag -y || true
-          gh release create "$TAG" dist/* --title "$TAG" --notes "CPUエンジン用の追加ファイル: TAESD(高速な画像デコーダ, MIT, madebyollin/taesd)と LCM-LoRA(latent-consistency/lcm-lora-sdv1-5)"
+          gh release delete "$TAG" --repo "${{ github.repository }}" --cleanup-tag -y || true
+          gh release create "$TAG" dist/* --repo "${{ github.repository }}" --title "$TAG" --notes "CPUエンジン用の追加ファイル: TAESD(高速な画像デコーダ, MIT, madebyollin/taesd)と LCM-LoRA(latent-consistency/lcm-lora-sdv1-5)"
